@@ -99,11 +99,15 @@ function fillLeaf(yTop,yBot){
   g.addColorStop(0,G.LIGHT); g.addColorStop(1,G.DEEP);
   ctx.fillStyle=g; ctx.fill();
 }
+  
 function fillPanel(yTop,yBot){
   const g=ctx.createLinearGradient(0,yTop,0,yBot);
-  g.addColorStop(0,"#c9f0ff"); g.addColorStop(1,"#f7fdff");
-  ctx.fillStyle=g; ctx.fill();
+  g.addColorStop(0,"#c9f0ff");   // celeste claro arriba
+  g.addColorStop(1,"#f7fdff");   // celeste casi blanco abajo
+  ctx.fillStyle=g;
+  ctx.fill();
 }
+
 
 /* -------- Preproceso -------- */
 let SHAPES=[], GEO=null, totalLen=0, cumShapeLen=[];
@@ -186,5 +190,6 @@ function init(){
 </script>
 </body>
 </html>
+
 
 
