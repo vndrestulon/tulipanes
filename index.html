@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Portada → Tulipanes</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  html,body{margin:0;height:100%;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  /* Portada */
+  #cover, #app{position:absolute;inset:0;width:100%;height:100%;}
+  #cover{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    background:linear-gradient(#c9f0ff,#f7fdff);
+    padding:24px; box-sizing:border-box;
+  }
+  #cover h1{font-size:clamp(22px,3.2vw,36px);margin:0 0 12px;color:#104e78}
+  #cover p{font-size:clamp(14px,2vw,18px);max-width:700px;margin:0 0 20px;color:#1b3a4b}
+  #cover button{
+    padding:12px 18px;font-size:16px;border:none;border-radius:10px;cursor:pointer;
+    background:#0078d7;color:#fff;box-shadow:0 8px 22px rgba(0,0,0,.15);
+  }
+  #cover button:hover{background:#005a9e}
+
+  /* App (canvas + HUD) */
+  #app{display:none}
+  canvas{display:block;width:100vw;height:100vh}
+  .hud{
+    position:fixed;top:10px;left:10px;background:#fff;padding:10px 12px;border-radius:12px;
+    box-shadow:0 6px 18px rgba(0,0,0,.12);font-size:13px;z-index:10;display:flex;gap:10px;align-items:center
+  }
+  .btn{padding:6px 10px;border:1px solid #e1e1e1;border-radius:10px;background:#fafafa;cursor:pointer}
+  .sep{width:1px;height:22px;background:#e9e9e9;margin:0 4px}
+  #status{opacity:.75}
+</style>
+</head>
+<body>
+
+<!-- Portada -->
+<div id="cover">
+  <h1>🌼 Mensaje de bienvenida</h1>
+  <p>Pon aquí tu texto: dedicatoria, instrucción o cualquier mensaje que quieras mostrar antes de los tulipanes.</p>
+  <button id="startBtn">Ver tulipanes</button>
+</div>
+
+<!-- App -->
+<div id="app">
+  <canvas id="cv"></canvas>
+  <div class="hud">
+    <button id="play" class="btn">▶︎ Play</button>
+    <button id="restart" class="btn">↺ Reiniciar</button>
+    <span>Velocidad</span>
+    <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1">
+    <span id="spdval">1×</span>
+    <div class="sep"></div>
+    <label><input id="rot" type="checkbox"> Rotar 180°</label>
+    <label><input id="flipY" type="checkbox"> Invertir eje Y</label>
+    <div class="sep"></div>
+    <span id="status">Cargando…</span>
+  </div>
+</div>
+
+<script>
+/* -------- Portada: al hacer clic se muestra la app y se inicia -------- */
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  document.getElementById('cover').style.display='none';
+  document.getElementById('app').style.display='block';
+  init();           // inicia la app
+  // play();        // <-- descomenta si quieres que ANIME automáticamente
+});
+
+/* -------- Canvas y UI -------- */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const playBtn=document.getElementById('play'), restartBtn=document.getElementById('restart');
+const speedEl=document.getElementById('speed'), spdval=document.getElementById('spdval');
+const rotEl=document.getElementById('rot'), flipEl=document.getElementById('flipY');
+const statusEl=document.getElementById('status');
+
+function fit(){
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  cv.width=Math.floor(cv.clientWidth*dpr);
+  cv.height=Math.floor(cv.clientHeight*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+/* -------- Paletas y color -------- */
+const Y={BASE:[1,0.85,0],SHADOW:[0.9,0.75,0],DEEP:[0.8,0.65,0],LIGHT:[1,0.93,0.4],SPEC:[1,1,0.75]};
+const G={LIGHT:"#79c36a",DEEP:"#2f7d32"};
+const rgbToCss=([r,g,b])=>`rgb(${Math.round((r>1?r/255:r)*255)},${Math.round((g>1?g/255:g)*255)},${Math.round((b>1?b/255:b)*255)})`;
+function toHSV([r,g,b]){r=r>1?r/255:r;g=g>1?g/255:g;b=b>1?b/255:b;let max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min,h=0,s=max?d/max:0,v=max;if(d){switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}h/=6}return{h,s,v};}
+function classify(c){const {h,s,v}=toHSV(c||[1,1,0]);const H=h*360;if(s>0.25&&v>0.2){if(H<=35||H>=330||(H>=35&&H<=70))return'petal';if(H>=70&&H<=170)return'leaf';}return'petal';}
+
+/* -------- Fondo celeste uniforme -------- */
+function bg(){
+  const g = ctx.createLinearGradient(0,0,0,cv.clientHeight);
+  g.addColorStop(0,"#c9f0ff");
+  g.addColorStop(1,"#f7fdff");
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
+}
+
+/* -------- Normalización + utilidades -------- */
+function bounds(S){let minX=1/0,maxX=-1/0,minY=1/0,maxY=-1/0;S.forEach(s=>s.pts.forEach(([x,y])=>{if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;}));return{minX,maxX,minY,maxY};}
+function norm(json){const arr=Array.isArray(json)?json:(json.paths||json.data||[]);return arr.map(o=>({pts:(o.path||o.coords||o.points||[]).map(([x,y])=>[x,y]),color:o.color,cls:o.cls||null})).filter(s=>s.pts.length>2);}
+function polyArea(pts){let a=0;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const[xi,yi]=pts[i],[xj,yj]=pts[j];a+=(xj+xi)*(yj-yi);}return Math.abs(a)*0.5;}
+function markPanel(shapes){
+  if(!shapes.length) return;
+  let maxA=-1, idx=-1; shapes.forEach((s,i)=>{const A=polyArea(s.pts); if(A>maxA){maxA=A; idx=i;}});
+  if(idx<0) return;
+  const {minX,maxX,minY,maxY}=bounds(shapes);
+  const cover=polyArea(shapes[idx].pts)/Math.max(1,(maxX-minX)*(maxY-minY));
+  const cls = shapes[idx].cls || classify(shapes[idx].color);
+  if(cover>0.7 && (cls==='petal' || cls==='other' || !cls)) shapes[idx].cls='panel';
+}
+
+/* -------- Rellenos -------- */
+function fillPetal(yTop,yBot){
+  const g=ctx.createLinearGradient(0,yTop,0,yBot);
+  g.addColorStop(0,rgbToCss(Y.SPEC));
+  g.addColorStop(0.25,rgbToCss(Y.LIGHT));
+  g.addColorStop(0.6,rgbToCss(Y.BASE));
+  g.addColorStop(1,rgbToCss(Y.DEEP));
+  ctx.fillStyle=g; ctx.fill();
+  const r=ctx.createRadialGradient(0,(yTop+yBot)/2,5,0,(yTop+yBot)/2,Math.max(10,Math.abs(yBot-yTop)*0.55));
+  r.addColorStop(0,"rgba(0,0,0,.06)"); r.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=r; ctx.fill();
+}
+function fillLeaf(yTop,yBot){
+  const g=ctx.createLinearGradient(0,yTop,0,yBot);
+  g.addColorStop(0,G.LIGHT); g.addColorStop(1,G.DEEP);
+  ctx.fillStyle=g; ctx.fill();
+}
+function fillPanel(yTop,yBot){ // pinta el “marco” con el mismo celeste
+  const g=ctx.createLinearGradient(0,yTop,0,yBot);
+  g.addColorStop(0,"#c9f0ff"); g.addColorStop(1,"#f7fdff");
+  ctx.fillStyle=g; ctx.fill();
+}
+
+/* -------- Preproceso + animación -------- */
+let SHAPES=[], GEO=null, totalLen=0, cumShapeLen=[];
+function preprocess(shapes){
+  SHAPES = shapes.map(s=>{
+    const segs=[]; let len=0;
+    for(let i=0;i<s.pts.length;i++){
+      const a=s.pts[i], b=s.pts[(i+1)%s.pts.length];
+      const L=Math.hypot(b[0]-a[0], b[1]-a[1]); segs.push({a,b,L}); len+=L;
+    }
+    return {...s, segs, len, cls:(s.cls || classify(s.color))};
+  });
+  markPanel(SHAPES);
+  const bb=bounds(shapes); GEO={bb};
+  totalLen = SHAPES.reduce((acc,s)=>acc+s.len,0);
+  cumShapeLen=[]; let run=0; for(const s of SHAPES){ cumShapeLen.push(run); run+=s.len; }
+}
+
+function drawFrame(progress){
+  fit(); bg();
+  const {minX,maxX,minY,maxY}=GEO.bb;
+  const W=Math.max(1,maxX-minX), H=Math.max(1,maxY-minY);
+  const m=40, scale=Math.min((cv.clientWidth-m*2)/W,(cv.clientHeight-m*2)/H);
+
+  ctx.save();
+  ctx.translate(cv.clientWidth/2,cv.clientHeight/2);
+  if (rotEl.checked) ctx.rotate(Math.PI);
+  if (flipEl.checked) ctx.scale(1,-1);
+  ctx.scale(scale,scale);
+  ctx.translate(-(minX+maxX)/2, -(minY+maxY)/2);
+
+  const targetLen = totalLen * progress;
+
+  // Formas completas
+  for (let si=0; si<SHAPES.length; si++){
+    const s=SHAPES[si];
+    const startLen = cumShapeLen[si];
+    const endLen   = startLen + s.len;
+    if (endLen <= targetLen){
+      ctx.beginPath();
+      ctx.moveTo(s.pts[0][0], s.pts[0][1]);
+      for(let i=1;i<s.pts.length;i++) ctx.lineTo(s.pts[i][0], s.pts[i][1]);
+      ctx.closePath();
+      let yT=1/0,yB=-1/0; s.pts.forEach(([,y])=>{if(y<yT)yT=y;if(y>yB)yB=y;});
+      if (s.cls==='panel'){ fillPanel(yT,yB); continue; }
+      if (s.cls==='leaf'){ fillLeaf(yT,yB); ctx.strokeStyle="rgba(0,0,0,0)"; ctx.stroke(); }
+      else { fillPetal(yT,yB); ctx.strokeStyle=rgbToCss(Y.BASE); ctx.lineWidth=0.6/scale; ctx.stroke(); }
+    }
+  }
+
+  // Forma actual con trazo parcial (sin animar panel)
+  const currentIndex = SHAPES.findIndex((_,i)=>cumShapeLen[i] + SHAPES[i].len > targetLen);
+  if (currentIndex>=0){
+    const s = SHAPES[currentIndex];
+    if (s.cls !== 'panel'){
+      const inside = targetLen - cumShapeLen[currentIndex];
+      let left = inside;
+      ctx.save(); ctx.beginPath();
+      for (const seg of s.segs){
+        if (left<=0) break;
+        const use = Math.min(left, seg.L);
+        const t = use/seg.L;
+        const x = seg.a[0] + (seg.b[0]-seg.a[0])*t;
+        const y = seg.a[1] + (seg.b[1]-seg.a[1])*t;
+        ctx.moveTo(seg.a[0], seg.a[1]); ctx.lineTo(x, y);
+        left -= use;
+      }
+      ctx.lineWidth = 1.2/scale; ctx.lineCap = "round";
+      ctx.strokeStyle = s.cls==='leaf' ? "#3b8d42" : rgbToCss(Y.BASE);
+      ctx.stroke(); ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+/* -------- Loop animación -------- */
+let playing=false, startTime=0, duration=6000, rafId=null;
+function tick(ts){
+  if(!playing) return;
+  if(!startTime) startTime=ts;
+  const t = Math.min(1,(ts-startTime)/duration);
+  drawFrame(t);
+  if (t<1) rafId=requestAnimationFrame(tick); else { playing=false; playBtn.textContent="▶︎ Play"; }
+}
+function play(){ if(playing){ playing=false; playBtn.textContent="▶︎ Play"; return; }
+  playing=true; playBtn.textContent="⏸ Pausa"; startTime=0; rafId=requestAnimationFrame(tick); }
+function restart(){ playing=false; playBtn.textContent="▶︎ Play"; startTime=0; drawFrame(0); }
+
+/* -------- Eventos UI -------- */
+playBtn.addEventListener('click', play);
+restartBtn.addEventListener('click', restart);
+speedEl.addEventListener('input', ()=>{
+  const sp=parseFloat(speedEl.value);
+  spdval.textContent=sp.toFixed(2).replace(/\.00$/,'')+'×';
+  duration = 6000 / sp;
+});
+rotEl.addEventListener('change', ()=>drawFrame(0));
+flipEl.addEventListener('change', ()=>drawFrame(0));
+
+/* -------- Carga automática del JSON -------- */
+async function loadJSON(){
+  try{
+    const r=await fetch('tulipanes.json?v='+Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const json=await r.json();
+    const shapes=norm(json);
+    if(!shapes.length) throw new Error('JSON sin paths válidos');
+    preprocess(shapes);
+    statusEl.textContent=`Cargado (${shapes.length} formas)`;
+    restart(); // listo para reproducir (o llamar play() si quieres autoplay)
+  }catch(e){
+    statusEl.textContent='Error cargando tulipanes.json';
+    console.error(e);
+  }
+}
+
+/* -------- Inicialización (solo cuando se pulsa el botón de portada) -------- */
+function init(){
+  fit(); bg();
+  loadJSON();
+  window.addEventListener('resize', ()=>{fit(); if(SHAPES.length) drawFrame(0);});
+}
+</script>
+</body>
+</html>
